@@ -1,157 +1,119 @@
-# Guia para a apresentação (explicação didática)
+# Guia para a apresentação
 
-Roteiro de cerca de 10 minutos, pensado para uma entrevista de **dados**.
+Roteiro de cerca de 10 minutos para a entrevista de **Engenharia de Software**.
 
 ---
 
-## 1. Como enquadrar (30 s)
+## 1. Abertura (30 s)
 
-> "Vi o problema em duas metades. A primeira é **decidir o lance certo em
-> tempo real**, sem race condition. A segunda, que é o coração de dados, é
-> **transformar cada decisão em dado confiável**, sabendo que o stream
-> duplica e embaralha eventos. No fim eu provo que o dado analítico bate com
-> o sistema transacional."
+> "O coração do problema é uma race condition: milhares de pessoas leem o
+> mesmo preço e tentam superá-lo ao mesmo tempo. Resolvi isso transformando
+> cada lance numa única escrita condicional no banco. Em volta disso
+> construí uma API idempotente, notificação em tempo real e testes que
+> provam a correção sob concorrência."
 
 ## 2. O problema com uma analogia (1 min)
 
-Um leiloeiro com mil pessoas gritando "R$ 500!" no mesmo segundo precisa:
-ouvir um de cada vez, aceitar só quem supera o último valor, não contar duas
-vezes quem repetiu o grito e anotar tudo num livro que depois vai ser
-auditado.
-
-A race condition em software:
+Uma planilha compartilhada em que a célula "preço atual" só pode ser alterada
+se ninguém mexeu nela desde que você olhou. Se alguém mexeu, sua alteração é
+recusada e você olha de novo.
 
 ```text
-Ana lê preço = 100      Beto lê preço = 100
-Ana grava 101           Beto grava 101        <- dois vencedores!
+SEM PROTEÇÃO                            COM ESCRITA CONDICIONAL
+Ana lê 100     Beto lê 100              Ana grava (versão 0) -> OK, versão 1
+Ana grava 101  Beto grava 101           Beto grava (versão 0) -> FALHA
+dois vencedores                         Beto relê 101 -> 409 abaixo_do_minimo
 ```
 
-## 3. Metade 1 — decidir o lance (2 min)
+## 3. As três perguntas que a API responde (2 min)
 
-**Uma frase:** o lance vira uma escrita condicional, "grave só se o leilão
-ainda está na versão que eu li e este `lance_id` ainda não existe".
+| Pergunta | Mecanismo | Resultado |
+|---|---|---|
+| Esse lance já foi processado? | `Idempotency-Key` gravada na mesma transação | reenvio recebe a mesma resposta |
+| O preço que eu vi ainda é o atual? | `versao` do leilão na condição de escrita | quem perdeu é reavaliado |
+| Em que ordem as coisas aconteceram? | `seq` incrementada no commit | ordem do servidor, nunca do celular |
 
-```text
-Ana grava (versão 0) -> OK, versão passa a 1
-Beto grava (versão 0) -> FALHA -> relê (preço 101) -> 101 não supera 101 + incremento -> rejeitado
-```
+## 4. Tour pelo código (3 min)
 
-| Conceito | Em uma linha |
-|---|---|
-| Controle otimista | a checagem e a escrita são a mesma operação atômica no DynamoDB |
-| Idempotência | o `lance_id` é a chave; um retry devolve a mesma resposta |
-| Ordem determinística | a ordem é a do commit no servidor, não o relógio do celular |
+Mostre nesta ordem; é uma **arquitetura hexagonal**:
 
-## 4. Metade 2 — o dado confiável (3 min) ⭐
+1. **`dominio.py` → `avaliar_lance`**: regras puras, sem banco nem HTTP. Fácil de testar.
+2. **`servico.py` → `dar_lance`**: ler → decidir → gravar; em conflito de versão, tenta de novo.
+3. **`repositorio.py` → `gravar_decisao`**: a porta e o adaptador em memória; idempotência, versão e evento numa operação atômica.
+4. **`repositorio_dynamodb.py`**: o mesmo contrato em produção, com `TransactWriteItems`. "Trocar o banco não muda o serviço."
+5. **`api.py`**: códigos HTTP corretos (`201`, `409`, `422`, `429`, `503`), validação, rate limit e o SSE `/ao-vivo`.
 
-Esta é a parte que mais conversa com o time de dados. Uso as camadas
-**SOR → SOT → SPEC**:
-
-| Camada | Em uma frase |
-|---|---|
-| **SOR** (System of Record) | "o que a origem mandou, exatamente como veio" |
-| **SOT** (Source of Truth) | "a versão oficial e confiável: limpa, única e ordenada" |
-| **SPEC** (Specialized) | "a visão pronta para uma área usar" |
-
-(Se alguém falar em medalhão: SOR ≈ Bronze, SOT ≈ Silver, SPEC ≈ Gold.)
-
-1. **CDC como outbox:** o DynamoDB Stream emite um evento para cada gravação.
-   Se gravou, o evento existe. Nada se perde entre "decidir" e "publicar".
-2. **SOR:** chega tudo como veio. O Kinesis/Firehose garante
-   *at-least-once*, então **haverá duplicados e eventos fora de ordem**. A
-   simulação injeta isso de propósito (cerca de 5% de duplicados e ordem
-   embaralhada).
-3. **SOT:**
-   - **contrato de esquema**: um registro inválido vai para quarentena e o pipeline não para;
-   - **dedup pela chave de negócio** `lance_id` (não pelo offset do stream);
-   - **reordenação** por `(leilao_id, sequencia)`, a sequência gravada pelo transacional;
-   - **LGPD**: o `usuario_id` vira um pseudônimo (hash com sal). Dá para
-     contar participantes e fazer joins, mas não para identificar a pessoa.
-4. **SPEC:** preço final, vencedor, taxa de aceite, participantes únicos e
-   motivos de rejeição. Respondem perguntas de negócio e de antifraude.
-5. **Data Quality + reconciliação:** regras automáticas, e a principal é
-   **"o preço final na SPEC é igual ao preço no DynamoDB"**. Em um banco,
-   conciliar o analítico com o operacional é o que dá confiança para
-   alguém tomar decisão com o dado.
-6. **Governança:** catálogo e Lake Formation (quem vê o quê). Encaixa num
-   **data mesh**: o domínio Leilões publica um produto de dados com dono,
-   contrato e SLA de qualidade.
-
-## 5. Demonstração (2 min)
-
-```bash
-python simular.py
-```
-
-Leia os três blocos impressos:
-- **Transacional:** `corridas_detectadas_e_reavaliadas` mostra dezenas de
-  milhares de disputas resolvidas; `invariantes: OK`.
-- **Dados:** `linhas_sor` > `linhas_sot`; a diferença são os
-  duplicados removidos.
-- **Qualidade:** todas as regras com `[PASSOU]`.
-
-Depois abra `saida/sot/lances.csv` (usuário pseudonimizado) e
-`saida/spec/resumo_leiloes.csv`.
+## 5. Demonstração ao vivo (2 min)
 
 ```bash
 python -m unittest -v
 ```
 
-Destaques: `test_mesmo_valor_ao_mesmo_tempo_so_um_vence` (50 threads, 1
-aceito) e `test_sot_remove_duplicados_e_reordena`.
+Destaque `test_50_requisicoes_simultaneas_mesmo_valor_um_vencedor`: 50
+requisições HTTP reais largam juntas (com uma barreira) e o resultado é
+exatamente um `201` e 49 `409`.
 
-## 6. Diagrama (2 min) — siga as três faixas
+```bash
+python servidor.py
+```
 
-1. **Laranja, transacional:** API Gateway → Lambda → DynamoDB (escrita condicional).
-2. **Roxo, ingestão:** Stream (CDC) → Kinesis → Firehose → S3 SOR.
-3. **Verde, dados:** Glue (ETL + Data Quality) → S3 SOT/SPEC (Iceberg) → Athena → QuickSight, com Lake Formation governando.
+Em outro terminal, abra `curl -N .../ao-vivo` e dê lances com `curl`: o novo
+preço aparece em tempo real. Repita o mesmo `Idempotency-Key` para mostrar o
+header `Idempotent-Replayed: true`.
 
-> "Escolhi poucos serviços, todos gerenciados. O caminho que responde ao
-> usuário tem só o necessário; todo o resto é assíncrono e não pode atrasar
-> nem derrubar o lance."
+```bash
+python simular.py
+```
+
+Mostre `corridas_detectadas_e_reavaliadas` (dezenas de milhares) e
+`invariantes: OK`. Com `--http`, a distribuição de status e a latência p50/p95/p99.
+
+## 6. Arquitetura AWS (2 min): abra o `.drawio`
+
+- **Laranja (síncrono):** CloudFront + WAF → ALB → Fargate → DynamoDB condicional. Só o necessário para decidir.
+- **Roxo (assíncrono):** Streams → Lambda → WebSocket para o tempo real; Scheduler → Lambda para encerrar.
+- **Verde (operação):** DLQ, CloudWatch e X-Ray.
+
+> "O caminho do lance tem uma única escrita. Tudo o que pode falhar sem
+> invalidar o lance fica fora dele."
 
 ## 7. Perguntas prováveis
 
-**Por que não usar o timestamp para ordenar?** O relógio do cliente é
-manipulável e dessincronizado. O servidor define a sequência no commit, e é
-ela que a SOT usa para reordenar.
+**Por que não um lock (Redis, `synchronized`)?** O lock é mais um sistema
+para falhar, e o TTL pode expirar no meio. Com a condição no banco, conferir
+e gravar são a mesma operação.
 
-**Por que deduplicar de novo no lake, se o transacional já é idempotente?**
-São garantias diferentes: o transacional garante 1 decisão por lance; o
-stream pode **entregar** a mesma decisão mais de uma vez. Cada camada protege
-a sua fronteira.
+**E com 100 mil lances/s num único leilão?** Uma chave do DynamoDB aceita
+cerca de 1.000 escritas/s. O cache do preço recusa a maioria antes do banco;
+para escala extrema, um sequenciador por leilão com resposta assíncrona.
 
-**Por que Iceberg?** Permite MERGE (dedup idempotente em reprocessamentos),
-*time travel* (auditoria: "como estava a tabela ontem?") e evolução de
-esquema.
+**Como escala horizontalmente?** A API é stateless; todo o estado está no
+DynamoDB. Basta adicionar containers.
 
-**Como você sabe que o dado está certo?** Pelas regras de Data Quality e,
-principalmente, pela reconciliação com a base operacional (DynamoDB), com alarme no
-CloudWatch se divergir.
+**E se o cliente não receber a resposta?** Reenvia com a mesma chave e
+recebe a mesma decisão. Se usar a chave com outro valor, recebe `422`.
 
-**E a LGPD?** O lake não guarda o id real. A chave do hash fica no Secrets
-Manager e o Lake Formation restringe colunas. Para reidentificar, seria
-preciso acesso controlado e auditado ao transacional.
+**Por que `409` para lance baixo?** É um conflito com o estado atual do
+recurso: alguém foi mais rápido. O corpo traz o preço atual para o cliente
+oferecer o próximo valor.
 
-**E se um leilão receber 100 mil lances/s?** Um pré-filtro com o preço em
-cache recusa a maioria antes do banco, e só os candidatos plausíveis vão
-para a escrita condicional. A alternativa extrema é um sequenciador por
-leilão (Kinesis particionado por `leilao_id`), com resposta assíncrona.
+**Por que SSE na POC e WebSocket na AWS?** SSE é unidirecional e cabe na
+biblioteca padrão; na AWS, o API Gateway WebSocket gerencia milhões de
+conexões sem servidor.
 
-**Por que Python com threads, se tem GIL?** A POC prova **correção** sob
-concorrência (com latência de banco simulada, as threads realmente disputam
-o mesmo leilão). Desempenho se mede com teste de carga na AWS.
+**Por que biblioteca padrão e não FastAPI?** Zero dependências: qualquer
+pessoa roda com `python servidor.py`. A camada HTTP é fina e isolada, então
+trocar por FastAPI muda só o `api.py`.
 
-## 8. Próximos passos (mostra maturidade)
+## 8. Limitações e próximos passos
 
-- Trocar o repositório em memória por DynamoDB real (mesma interface).
-- Escrever o job SOT em PySpark/Glue sobre Iceberg e as regras em DQDL.
-- IaC (CDK/Terraform), CI e teste de carga.
-- SPEC de antifraude: detectar contas com padrão de bot.
+- Rodar o `RepositorioDynamoDB` contra o DynamoDB Local nos testes.
+- Autenticação real (JWT) e WebSocket.
+- IaC (CDK/Terraform), CI/CD e teste de carga distribuído.
+- Cache do preço atual para o pré-filtro do leilão quente.
 
 ## 9. Uso de IA
 
-Usei IA para acelerar o código, os testes e a documentação. As decisões
-(escrita condicional, CDC como outbox, dedup e reordenação na SOT,
-pseudonimização e reconciliação) foram revisadas por mim e estão cobertas
-por testes.
+Usei IA a partir de uma especificação ([`SPEC.md`](SPEC.md)) com critérios de
+aceite. As decisões (controle otimista, idempotência, eventos pelo Stream,
+códigos HTTP) foram minhas, e cada etapa só foi aceita com os testes passando.

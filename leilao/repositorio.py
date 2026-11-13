@@ -33,19 +33,32 @@ class ResultadoGravacao:
 
 class RepositorioLeiloes(Protocol):
     def obter_leilao(self, leilao_id: str) -> EstadoLeilao | None: ...
+    def criar_leilao(self, estado: EstadoLeilao) -> bool: ...
     def buscar_decisao(self, lance_id: str) -> Decisao | None: ...
     def gravar_decisao(self, decisao: Decisao, versao_esperada: int,
                        novo_estado: EstadoLeilao | None) -> ResultadoGravacao: ...
 
 
 class RepositorioEmMemoria:
-    def __init__(self, leiloes: list[EstadoLeilao]):
+    def __init__(self, leiloes: list[EstadoLeilao] | None = None):
+        leiloes = leiloes or []
         self._leiloes = {e.leilao_id: e for e in leiloes}
         self._locks = {e.leilao_id: threading.Lock() for e in leiloes}
         self._sequencias = {e.leilao_id: 0 for e in leiloes}
         self._decisoes: dict[str, Decisao] = {}       # tabela de idempotência
         self._lock_decisoes = threading.Lock()
         self.outbox: list[Decisao] = []               # "DynamoDB Streams"
+        self._lock_cadastro = threading.Lock()
+
+    def criar_leilao(self, estado: EstadoLeilao) -> bool:
+        """Cria se não existir (na AWS: PutItem com attribute_not_exists)."""
+        with self._lock_cadastro:
+            if estado.leilao_id in self._leiloes:
+                return False
+            self._locks[estado.leilao_id] = threading.Lock()
+            self._sequencias[estado.leilao_id] = 0
+            self._leiloes[estado.leilao_id] = estado
+            return True
 
     def obter_leilao(self, leilao_id: str) -> EstadoLeilao | None:
         return self._leiloes.get(leilao_id)  # leitura de um objeto imutável: segura

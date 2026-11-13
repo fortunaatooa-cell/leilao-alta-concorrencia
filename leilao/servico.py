@@ -19,11 +19,13 @@ class ServicoDeLances:
     def __init__(self, repositorio: RepositorioLeiloes,
                  relogio: Callable[[], float] = time.time,
                  max_tentativas: int = 100,
-                 latencia_simulada_s: float = 0.0):
+                 latencia_simulada_s: float = 0.0,
+                 ao_gravar: Callable[[Decisao], None] | None = None):
         self._repo = repositorio
         self._relogio = relogio
         self._max_tentativas = max_tentativas
         self._latencia = latencia_simulada_s  # imita a ida e volta ao banco (só na simulação)
+        self._ao_gravar = ao_gravar   # ex.: notificar o novo preço (na AWS: Streams -> Lambda)
         self.conflitos_de_versao = 0   # métrica: quantas corridas foram detectadas
 
     def consultar(self, leilao_id: str) -> EstadoLeilao | None:
@@ -54,6 +56,8 @@ class ServicoDeLances:
             r = self._repo.gravar_decisao(decisao, estado.versao,
                                           novo if status is Status.ACEITO else None)
             if r.resultado is Resultado.GRAVADO:
+                if self._ao_gravar is not None:
+                    self._ao_gravar(r.decisao)
                 return r.decisao
             if r.resultado is Resultado.LANCE_JA_EXISTE:
                 return replace(r.decisao, reenvio=True)

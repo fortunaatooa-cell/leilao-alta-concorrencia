@@ -1,128 +1,110 @@
 # Arquitetura AWS e decisões técnicas
 
-Diagrama: [`arquitetura_leilao_aws.drawio`](arquitetura_leilao_aws.drawio).
-Ele está dividido em três faixas, que são as três responsabilidades da solução.
+Diagrama editável com ícones AWS: [`arquitetura_leilao_aws.drawio`](arquitetura_leilao_aws.drawio).
 
 ```mermaid
 flowchart LR
-    subgraph T[1 · Transacional]
-      U[Usuários] --> GW[API Gateway] --> FN[Lambda Bid API] --> DDB[(DynamoDB)]
-    end
-    subgraph I[2 · Ingestão / SOR]
-      DDB -->|Stream CDC| KDS[Kinesis] --> FH[Firehose] --> B[(S3 SOR)]
-    end
-    subgraph D[3 · SOT/SPEC, governança, consumo]
-      B --> GL[Glue ETL + Data Quality] --> SG[(S3 SOT/SPEC · Iceberg)] --> AT[Athena] --> QS[QuickSight]
-      LF[Lake Formation + Catalog] -.-> SG
-    end
+    U[Usuário] -->|1 POST /lances| CF[CloudFront + WAF] --> ALB --> API[Bid API · ECS Fargate]
+    COG[Cognito] -.JWT.-> API
+    API -->|2 TransactWrite condicional| DDB[(DynamoDB)]
+    DDB -->|3 Streams| LN[Lambda notificador] -->|4 novo preço| WS[API Gateway WebSocket] -.push.-> U
+    LN -.falha.-> DLQ[SQS DLQ]
+    SCH[EventBridge Scheduler] --> LF[Lambda encerra leilão] --> DDB
 ```
 
-## Por que esse desenho (e por que simples)
+## 1. Requisitos (explícitos e implícitos)
 
-- **Poucos serviços, todos gerenciados/serverless.** Menos coisa para operar,
-  escala automática e cobrança por uso. É um desenho fácil de aprovar em
-  arquitetura e segurança.
-- **Separação clara entre o transacional e o analítico.** O DynamoDB é a
-  **base operacional** que decide o lance. O lake nunca decide
-  nada: ele recebe, organiza e prova.
-- **Pensado para um banco:** rastreabilidade de ponta a ponta (cada lance tem
-  um id e uma sequência), dado pessoal pseudonimizado no lake, acesso
-  governado por Lake Formation e conciliação automática entre as visões.
-  Encaixa num modelo de **data mesh**: o domínio "Leilões" publica um
-  **produto de dados** (a SOT/SPEC) com contrato, dono e qualidade.
+| Requisito | Como é atendido |
+|---|---|
+| Centenas de milhares de lances em segundos | API stateless no Fargate com auto scaling; DynamoDB on-demand; WAF e rate limit barram abuso |
+| Resposta em tempo real | caminho síncrono curto: validar → 1 escrita no DynamoDB → responder (~10 ms) |
+| Todos veem o novo preço | DynamoDB Streams → Lambda → WebSocket, fora do caminho do lance |
+| Ordem de chegada determinística | ordem dos commits no item do leilão (`versao`/`seq`), definida pelo servidor |
+| Sem lance inválido por race condition | escrita condicional pela versão lida; quem perde a corrida é reavaliado |
+| Sem lance duplicado | `Idempotency-Key` (UUID do cliente) gravada na mesma transação; reenvio recebe a mesma resposta |
+| **Além do enunciado** | anti-sniping, incremento mínimo, encerramento por horário, rate limit, observabilidade, testes de carga |
 
-## Camadas de dados: SOR → SOT → SPEC
+## 2. Caminho do lance (síncrono)
 
-| Camada | Significado | Neste projeto | Quem usa |
-|---|---|---|---|
-| **SOR** — System of Record | o dado **como veio da origem**, bruto e imutável; base para reprocessar e auditar | eventos de decisão vindos do CDC, com duplicados e fora de ordem | engenharia de dados, auditoria |
-| **SOT** — Source of Truth | o dado **tratado e oficial**: esquema validado, deduplicado, ordenado, pseudonimizado; a versão única e confiável | uma linha por lance, em ordem de commit | todos os consumidores |
-| **SPEC** — Specialized | visões **especializadas** para um uso ou área de negócio | resumo por leilão, motivos de rejeição | negócio, risco, antifraude, BI |
-
-> Para quem conhece a arquitetura medalhão: SOR ≈ Bronze, SOT ≈ Silver,
-> SPEC ≈ Gold. Aqui uso a nomenclatura SOR/SOT/SPEC.
->
-> Atenção ao termo: o **DynamoDB é a base operacional** que decide o lance.
-> A SOR é a **camada de dados** que guarda, sem alterações, o que essa
-> origem publicou.
-
-## Faixa 1 — Transacional: decidir sem race condition
-
-O lance é aceito só quando o DynamoDB grava de forma **condicional e atômica**:
+1. **CloudFront + WAF**: TLS na borda, proteção contra bots e rate limit por IP.
+2. **ALB → Bid API (ECS Fargate)**: containers stateless em várias AZs, com auto scaling por CPU e requisições. O usuário vem do JWT do Cognito, nunca do corpo.
+3. **DynamoDB**: uma transação decide o lance:
 
 ```text
 TransactWriteItems:
-  Put    LANCE#<lance_id>  Condition: attribute_not_exists(PK)          -> sem duplicado (idempotência)
-  Update LEILAO#<id>       SET preco, vencedor, versao = versao + 1
-                           Condition: versao = :versao_lida             -> sem race condition
-                                      AND :agora < encerra_em           -> nada depois do fim
+  Put    LANCE#<idempotency_key>  Condition: attribute_not_exists(pk)          -> sem duplicado
+  Update LEILAO#<id>              SET preco, vencedor, versao = versao + 1, seq = seq + 1
+                                  Condition: versao = :versao_lida             -> sem race condition
+                                             AND :agora < encerra_em           -> nada depois do fim
 ```
 
-- Se a condição falha, quem perdeu a corrida **relê e é reavaliado**
-  (controle otimista). Não existe janela entre conferir e gravar.
-- **Ordem determinística:** vale a ordem dos commits (`sequencia` e `versao`
-  gravadas pelo servidor), nunca o relógio do cliente. Em empate de valor,
-  vence quem commitou primeiro.
-- **Idempotência:** o cliente manda um `lance_id` (UUID); um retry recebe a
-  mesma resposta.
-- **Tempo real:** a resposta sai logo após uma única escrita, e o novo preço é
-  enviado aos outros participantes via WebSocket.
-- **Leilão muito disputado:** uma chave do DynamoDB suporta cerca de 1.000
-  escritas/s. A Lambda recusa na hora quem está abaixo do preço atual (em
-  cache) e só os candidatos plausíveis chegam à escrita condicional.
+Se a condição falha, a transação inteira é desfeita. A API distingue os dois casos:
+- **a chave já existe** → é um reenvio: devolve a decisão original (`Idempotent-Replayed: true`);
+- **a versão mudou** → outro lance ganhou: relê o leilão e reavalia (pode virar `409 abaixo_do_minimo`).
 
-## Faixa 2 — Ingestão: SOR
+Código: [`leilao/servico.py`](../leilao/servico.py) (loop de reavaliação) e
+[`leilao/repositorio_dynamodb.py`](../leilao/repositorio_dynamodb.py) (transação real).
 
-- **DynamoDB Streams (CDC)** publica cada decisão gravada. Funciona como uma
-  *outbox* nativa: se a gravação aconteceu, o evento existe. Não há
-  *dual write*, e portanto não há evento perdido.
-- **Kinesis → Firehose → S3 SOR**: dado bruto, imutável, particionado por
-  data. É a fonte para reprocessar tudo, se necessário.
-- **Premissa honesta:** a entrega é *at-least-once* e pode vir fora de ordem.
-  A camada seguinte é desenhada para isso (a simulação injeta duplicados e
-  embaralha os eventos de propósito).
+### Por que controle otimista e não lock?
 
-## Faixa 3 — SOT, SPEC, governança e consumo
+- Um lock distribuído (Redis, por exemplo) é mais um sistema para falhar, e o TTL pode expirar no meio da operação.
+- Com a condição dentro do banco, **conferir e gravar são a mesma operação atômica**: não existe janela entre elas.
+- O custo de um conflito é uma releitura, e conflitos só acontecem entre lances do mesmo leilão.
 
-| Camada | O que garante | No código |
-|---|---|---|
-| **SOT** | contrato de esquema (registro inválido vai para quarentena), **dedup por `lance_id`**, **reordenação por `(leilao_id, sequencia)`**, **usuário pseudonimizado** (hash com sal) | `dados.construir_sot` |
-| **SPEC** | preço final, vencedor, taxa de aceite, participantes únicos, motivos de rejeição | `dados.construir_spec` |
-| **Data Quality** | unicidade, completude, sequência sem buracos, aceitos crescentes, **reconciliação SPEC × DynamoDB**, ausência de PII | `dados.checar_qualidade` (na AWS: Glue Data Quality) |
+### Por que DynamoDB?
 
-- **Formato:** Apache Iceberg/Parquet no S3, o que dá *upsert* (MERGE) para
-  dedup idempotente, *time travel* para auditoria e consulta barata no Athena.
-- **Governança:** Glue Data Catalog e Lake Formation (permissão por coluna; a
-  chave de pseudonimização fica no Secrets Manager, fora do lake).
-- **Consumo:** Athena (SQL) e QuickSight para negócio, risco e antifraude
-  (por exemplo, padrões de lances de bots).
-- **Observabilidade:** CloudWatch com latência do lance, taxa de conflito,
-  atraso do stream e alarme quando uma regra de Data Quality falha.
+Latência baixa e previsível em qualquer escala, escrita condicional e transações
+nativas, Streams para eventos e nenhum servidor para operar. Um Aurora com
+`SELECT ... FOR UPDATE` também resolveria a correção, mas lock de linha sob
+disputa alta degrada mais e o banco escala menos horizontalmente.
 
-## Falhas e como a solução se comporta
+## 3. Tempo real e agendamento (assíncrono)
 
-| Situação | Resultado |
+- **DynamoDB Streams → Lambda notificador → API Gateway WebSocket**: cada lance aceito vira um evento a partir do próprio commit (sem *dual write*), e todos os participantes recebem o novo preço.
+- A notificação **não está no caminho do lance**. Se falhar, vai para a **SQS DLQ** após retries, e o lance continua válido. O cliente pode consultar `GET /leiloes/{id}` a qualquer momento.
+- **EventBridge Scheduler → Lambda** encerra o leilão no horário. Mesmo que atrase, a condição `:agora < encerra_em` já impede lances depois do fim.
+- Na POC, o tempo real é um **Server-Sent Events** (`/ao-vivo`) com fila por assinante; um cliente lento perde eventos intermediários, mas nunca trava o leilão.
+
+## 4. Escala e o leilão "quente"
+
+Um item raro concentra o tráfego em **uma única chave** do DynamoDB, que suporta
+cerca de 1.000 escritas/s por partição. Mitigações, em camadas:
+
+1. **Pré-filtro na API:** preço atual em cache (alimentado pelo Stream, TTL curto). Lances `< preço + incremento` são recusados com `409` sem tocar o banco. Num leilão disputado, a maioria fica abaixo do mínimo.
+2. **A taxa de lances aceitos é naturalmente baixa:** cada um precisa superar o anterior.
+3. **WAF + token bucket por usuário** (`429`) contra bots.
+4. **Escala extrema:** um sequenciador por leilão (fila particionada por `leilao_id` com um único consumidor) elimina conflitos, mas a resposta passa a ser assíncrona. Fica como evolução, não como padrão.
+
+## 5. Falhas
+
+| Situação | Comportamento |
 |---|---|
-| Dois lances iguais no mesmo milissegundo | um é aceito; o outro é reavaliado e rejeitado como `abaixo_do_minimo` |
-| Cliente reenvia por timeout | mesma resposta; nenhuma decisão nova |
-| Evento duplicado no stream | removido na SOT (dedup por `lance_id`) |
-| Eventos fora de ordem | SOT reordena por `sequencia` |
-| Registro corrompido | quarentena; o pipeline não para |
-| Divergência entre lake e operacional | a regra de reconciliação falha e dispara um alarme |
-| Lance depois do fim | a condição `agora < encerra_em` recusa, mesmo se o job de encerramento atrasar |
+| Cliente sem resposta (timeout) | reenvia com a mesma `Idempotency-Key` e recebe a decisão original |
+| Mesma chave com outro valor | `422 idempotency_key_reutilizada` |
+| Container cai após o commit | a decisão já está gravada; o evento sai pelo Stream |
+| Notificação falha | retries + DLQ; o lance não é afetado |
+| Disputa excessiva | após N tentativas, `503`; reenviar com a mesma chave é seguro |
+| Falha de AZ | Fargate e DynamoDB multi-AZ; Global Tables para DR, com escrita em uma única região para manter a ordem |
 
-## Da POC para a AWS
+## 6. Segurança e operação
 
-| POC (Python) | AWS |
+- Cognito (JWT) valida o usuário; WAF na borda; containers em subnets privadas.
+- Criptografia com KMS em repouso; TLS em trânsito.
+- **Métricas no CloudWatch:** latência p50/p95/p99 do lance, taxa de `409`, conflitos de versão por segundo, `429`, tamanho da DLQ. **X-Ray** para tracing ponta a ponta.
+- Teste de carga antes de leilões grandes (o `simular.py --http` é a versão local).
+- IaC com CDK ou Terraform e deploy blue/green no ECS (próximos passos).
+
+## 7. Da POC para a AWS
+
+| POC | AWS |
 |---|---|
-| `dominio.avaliar_lance` + `servico.ServicoDeLances` | Lambda Bid API |
-| `RepositorioEmMemoria.gravar_decisao` | DynamoDB `TransactWriteItems` condicional |
-| `repo.outbox` | DynamoDB Streams → Kinesis |
-| `dados.entregar_como_kinesis` | Firehose → S3 SOR |
-| `dados.construir_sot` / `construir_spec` | Glue ETL (Spark) em tabelas Iceberg |
-| `dados.checar_qualidade` | Glue Data Quality (regras DQDL) + alarme |
-| `dados.pseudonimizar` | Glue + chave no Secrets Manager, acesso via Lake Formation |
+| `api.py` (http.server, sem dependências) | Bid API em container no ECS Fargate atrás do ALB |
+| `X-Usuario-Id` | JWT do Cognito |
+| `LimitadorDeTaxa` | WAF rate-based rules + throttling |
+| `RepositorioEmMemoria` (lock por leilão + checagem de versão) | `RepositorioDynamoDB` (`TransactWriteItems` condicional) |
+| `Notificador` + SSE `/ao-vivo` | DynamoDB Streams → Lambda → API Gateway WebSocket |
+| `Dockerfile` | imagem no ECR |
 
-**Limitações:** a POC roda em um único processo e prova a **correção**, não a
-capacidade da AWS. A latência de banco é simulada para provocar disputas
-reais entre threads.
+**Limitações:** a POC roda em um processo, então os números de carga medem
+a correção e a latência local, não a capacidade da AWS. O adaptador DynamoDB
+não é exercitado pelos testes; o próximo passo é rodá-lo contra o DynamoDB Local.

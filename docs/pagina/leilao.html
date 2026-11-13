@@ -119,11 +119,12 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
 
 <div class="wrap">
 <header>
-  <span class="eyebrow">Desafio técnico · Engenharia de Dados · AWS</span>
-  <h1>Leilão de alta concorrência: do lance ao dado confiável</h1>
-  <p class="lede">Centenas de milhares de pessoas dão lances no mesmo segundo. O sistema precisa aceitar só o lance certo, na ordem certa, sem duplicados. Depois, cada decisão vira dado auditável nas camadas SOR, SOT e SPEC.</p>
+  <span class="eyebrow">Desafio técnico · Engenharia de Software · AWS</span>
+  <h1>Leilão de alta concorrência: um lance certo, na ordem certa</h1>
+  <p class="lede">Centenas de milhares de pessoas dão lances no mesmo segundo. A API precisa responder em tempo real, aceitar só o lance válido, na ordem de chegada, e nunca contar o mesmo lance duas vezes.</p>
   <nav aria-label="Seções">
     <a href="#simulador">Testar o simulador</a>
+    <a href="#api">Ver a API</a>
     <a href="#arquitetura">Ver a arquitetura AWS</a>
     <a href="#como-funciona">Como funciona</a>
     <a href="#codigo">Rodar o código</a>
@@ -134,7 +135,7 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
   <div class="sechead">
     <span class="eyebrow">1 · Teste você mesmo</span>
     <h2>Simulador de lances simultâneos</h2>
-    <p>Roda no seu navegador a mesma lógica do código Python. Cada usuário vê o preço, espera a rede, envia o lance e o servidor grava com escrita condicional. Desligue a proteção para ver o que acontece sem ela.</p>
+    <p>Roda no seu navegador a mesma lógica da API. Cada usuário vê o preço, espera a rede, envia o lance e o servidor grava com escrita condicional. Desligue a proteção para ver o que acontece sem ela.</p>
   </div>
   <div class="panel">
     <div class="controls">
@@ -144,8 +145,6 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
         <input type="range" id="pQuente" min="10" max="100" step="5" value="70"></label>
       <label class="ctl" for="pRetry">Clientes que reenviam por timeout <output id="oRetry">8%</output>
         <input type="range" id="pRetry" min="0" max="40" step="1" value="8"></label>
-      <label class="ctl" for="pDup">Eventos duplicados pelo stream <output id="oDup">5%</output>
-        <input type="range" id="pDup" min="0" max="40" step="1" value="5"></label>
     </div>
     <label class="switch" for="seguro"><input type="checkbox" id="seguro" checked>
       <span>Proteção contra race condition (escrita condicional + idempotência)
@@ -156,15 +155,15 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
     </div>
     <div id="veredito" class="verdict ok" role="status">Calculando…</div>
     <div class="stages">
-      <div class="stage tx"><h3><span class="dot"></span>Transacional</h3><dl class="kv" id="kvTx"></dl></div>
-      <div class="stage ing"><h3><span class="dot"></span>SOR → SOT</h3><dl class="kv" id="kvIng"></dl></div>
-      <div class="stage dat"><h3><span class="dot"></span>Qualidade de dados</h3><ul class="checks" id="checks"></ul></div>
+      <div class="stage tx"><h3><span class="dot"></span>Servidor</h3><dl class="kv" id="kvTx"></dl></div>
+      <div class="stage ing"><h3><span class="dot"></span>Respostas HTTP</h3><dl class="kv" id="kvHttp"></dl></div>
+      <div class="stage dat"><h3><span class="dot"></span>Invariantes</h3><ul class="checks" id="checks"></ul></div>
     </div>
     <div class="twocol">
       <div style="display:grid;gap:8px;min-width:0">
-        <h3>SPEC · resumo por leilão</h3>
-        <div class="tablebox"><table id="tSpec"></table></div>
-        <p class="caption">leilao-006 já estava encerrado: todo lance nele precisa ser recusado. O vencedor aparece pseudonimizado (LGPD).</p>
+        <h3>Resumo por leilão</h3>
+        <div class="tablebox"><table id="tResumo"></table></div>
+        <p class="caption">leilao-006 já estava encerrado: todo lance nele precisa ser recusado com 422.</p>
       </div>
       <div style="display:grid;gap:8px;min-width:0">
         <h3>Preço do leilão mais disputado, lance a lance</h3>
@@ -173,57 +172,102 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
       </div>
     </div>
     <div style="display:grid;gap:8px;min-width:0">
-      <h3>SOT · primeiras linhas do leilão mais disputado</h3>
-      <div class="tablebox"><table id="tSot"></table></div>
+      <h3>Primeiras decisões do leilão mais disputado</h3>
+      <div class="tablebox"><table id="tDec"></table></div>
     </div>
+  </div>
+</section>
+
+<section id="api">
+  <div class="sechead">
+    <span class="eyebrow">2 · Contrato</span>
+    <h2>A API</h2>
+    <p>O usuário vem do token de login (na POC, do header <code>X-Usuario-Id</code>). A <code>Idempotency-Key</code> é um UUID gerado pelo cliente por lance.</p>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Requisição</h3>
+<div class="timeline">POST /leiloes/relogio-raro/lances
+Idempotency-Key: 7f3c9a2e-1b4d-4e8a-9c1f-2a6b8d0e5f11
+X-Usuario-Id: ana
+
+{ "valor_cents": 150000 }</div>
+    </div>
+    <div class="card">
+      <h3>Resposta</h3>
+<div class="timeline"><span class="ok">201 Created</span>
+{ "status": "aceito", "sequencia": 42,
+  "preco_atual_cents": 150000 }
+
+<span class="bad">409 Conflict</span>
+{ "status": "rejeitado",
+  "motivo": "abaixo_do_minimo",
+  "preco_atual_cents": 150100 }</div>
+    </div>
+  </div>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Método e rota</th><th>O que faz</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST /leiloes</code></td><td>cria um leilão</td></tr>
+        <tr><td><code>GET /leiloes/{id}</code></td><td>preço atual, próximo lance mínimo, vencedor e fim</td></tr>
+        <tr><td><code>POST /leiloes/{id}/lances</code></td><td>dá um lance</td></tr>
+        <tr><td><code>GET /leiloes/{id}/ao-vivo</code></td><td>recebe cada novo preço em tempo real (Server-Sent Events)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>HTTP</th><th>Quando</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip ok">201</span></td><td>lance aceito</td></tr>
+        <tr><td><span class="chip ok">mesma</span></td><td>reenvio com a mesma chave: mesma resposta e header <code>Idempotent-Replayed: true</code></td></tr>
+        <tr><td><span class="chip bad">409</span></td><td>abaixo do mínimo (alguém foi mais rápido) ou usuário já é o vencedor</td></tr>
+        <tr><td><span class="chip bad">422</span></td><td>leilão encerrado, valor inválido ou chave reutilizada com outro valor</td></tr>
+        <tr><td><span class="chip bad">429</span></td><td>muitos lances do mesmo usuário</td></tr>
+        <tr><td><span class="chip bad">503</span></td><td>disputa excessiva; reenviar com a mesma chave é seguro</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
 <section id="arquitetura">
   <div class="sechead">
-    <span class="eyebrow">2 · Desenho</span>
+    <span class="eyebrow">3 · Desenho</span>
     <h2>Arquitetura na AWS</h2>
-    <p>Poucos serviços, todos gerenciados. O caminho que responde ao usuário é curto, e o resto é assíncrono. A versão com os ícones oficiais da AWS abre no diagrams.net: <a id="drawioLink" href="https://app.diagrams.net/?libs=aws4&amp;splash=0#R7Vvdbhu5FX4VQgsECerIGv1Y9ioK4OgnDerF2pGLXBrUkBoRmhmOSY5s56pXvW%2BxD9BsLxYN0Ku26H31JnmSnsP5Vax05Y6dXRv2hU0Oh5zD7zuHPOeQfhFczoTPyVxq06%2FRKKozQT1FA10Puam9fJFWiWD9ms%2BFT2WNhDTg%2FdoR1FZ%2FleQ5GVImNTl8N4H3g8vXikbz7yTjPmGX%2FZrTaTRqhF31awdY8BSO5CSFiXgPAzn4OBaMa9tgpPSNiJKKK8OQu8aWqVLyInk8k34ySkQ9nhcmLvWL2jvBzBxq7f1G8uC3XHhzHKrRhCcBxVYo6DmIf4HFly%2BUlAbnMOC%2Bb6fcqO2u1e3YiofmepOpkSX1YxDgiW960yee6WUQydAXISef%2FvADYZQw7gqNj5kkPg1dTiiUQQic7UysPiy5j0Ps2jFAQHOF0zL80vTmJvD7To%2F6wgv7Pp%2BZ3kyGxuLo7NvyQPpS9b9ptprj1gh6L7mCnmuSOwlPXAbcqCsCjS3AARjq1MhFgprlap4Chq0UgPfSHjjx3WTmawi4voxZjgLoAxngE%2FKffxNNn3OqzXMHKzBNQ3H2TAarv4dCkifnsUzh%2BhfXSY08ZRReC7ieP8tBkLFBKAepWjR6oJxM8GzaoQx5htHFXBg%2BiajL%2BxegkiWgWknZjuj0rDQwpoLRIilCw9VoCSNqqLvS92mkxRTebPQUd2OlxZK%2F5RoHavRAdyLeDy491Pk6vdDtuqdkHIFYb2DcDS1nUDyzQJ1R4FgbJRd8nTMwSL80HSRQgGYfWs6NjMrsa5ifCL0jKPdbjQ0KwKiecwaibqkJTjdRhXahC06zW1KG%2FW21wafXDeLTn%2F5CThUNNUgtQ%2BonJgH2wDjJjIEHxPAgkkRxWrID8nRKNbwVcZV1Po952rlQEMA4ZDBhsBHlWrpb1zQhVZAC52%2FGw3FjtLfOxmjYdRqNMtjXmSjD7zSz6qmM%2BnvX9O3%2FMkznIKFjv0xHq0RHs7EtHdNNdHwgb0KPa4PLEQAPAHAawBQsMS4NKKxXk%2B%2FflmmYXGngh8gZectdqdi3ydo1VbGRO2DbgYSpgU3jCIPhYIdQ89y3xi%2BB3spMNUeD8Xidqf1BewzPfh1MtRrVqXI3UfUjEHFKPv3xz2RyPAJYPQlyhTRc%2FUQJxzVVx4FcIwpe75OJjBVYFdB1CgzNcf3F%2FtgSge0AaO85q8rKaDTeG%2B2vs9I9PHScvV8JK53ml1hpbbuexTkpv9fx6oMSUueo6QU37hxW2Wv703XJN%2BxYJSTtS8M1JO0r%2BTqegXhEp9w%2FlloYWAz7U2mMDL64V7gct7WcuBzZZo%2FqCAWdiUvOPtv%2BnE3bW6y50tui30nAd%2FBvCn55K%2BluiTyNhHdR%2BBXHb8hravgFvbLWoVDb344mp%2BQ35B2fTqQLZBQtT6NYz9HZCOVSkkjx1U%2Fy2R0Qly5CayYwsz93xl3hxTTWedzAm%2BLaLgToloAjo6%2B7J4DymZfgur3beDsEz8Kc3SMaTGHPwc3jlWAEyC6ohFcEw8Uu2fTvgMR0z7%2B%2FJPoWvq3tc%2B92%2BGOscC6GVxAeyuGrgjauXSXAkwdhmUhct5J5ApHg7BnEBwwYxMbQ6C4MdHDQ7Ayde8wts8iy6bbs7jdvh90F0zm7vwMKtNAQ8gOhE%2Bst6hKZHHcOqcFAE2f%2BcaHdwOMiwfAMw9uzxOPWN%2BW01a244s4Lg0Uqx0LxudT8ka%2Bf4WuWArW1A9q4JcZ0q1hjJy27QaaBWWp7aQAmgtjYFNJd2F7q099fLnVra%2BKat0ScB5TlzL2G32R0egRbnbW7kxjmb0qOLMRecYRBGkTWEGVD4ej18fDRLDek0wDKG5PZOahqhdq7boanZNcG1SVrfOPyKVceNBxTdR5z82iO1cyxcUsM%2BrNSrLHgZCxVQBETMElrndYuB%2FDLl16JUEwTK%2Blj8EGoy7W%2BEyd1OGy124N7HYAs%2BNksw%2FTG7HZbnWqpAjPnYZF4PrTVEouTk6NHn3RT8G%2BBuqkXWtUWz4vA4iQW7mKC3UtsIXZTSRXTj6RtIO0cMdOI2U0D%2FqrEuUU6zh7xvaPASYk4n5rVx9AVdIdQn6qA6x0yPLkLEkddp9N9dY9JtGeBF4jfWfPG7kzV0J47OY9OPQnZc44483gyTanMXHqYtxllz3rZOUEjQ4iH7BAP6PtTX7oLrI6Bpb6z8VAteZac0DdL4Dob%2BPeRtVfUXXj2m9k5kP0pH2%2BivJ%2FhRhLwbe7eUOVxkyWT1xBVHPRVLJPeW8HWzGF7kHClCfcMsllYFa9WjlezTkD5l5RoniX7SIi%2FgpjJ%2BEGiidntDErMlFbEsp1j2aqTLNua5uLI08Fw8OxuUVzbNr8eijbHnMGIKcmKMHa%2Bkgn%2FQnDZpG1uwPOqaO3laLUfJFyYD83QwkxbRbi6OVydOqbpkmP770%2FvFru1dMDXw85mJjPwbLarInr7OXp7DxKwJCNYqJv2qiJ28JUWs19MwzDrlntwSYxfETK8dXqfMXN%2BBjPMc92mijlFqNB9kEqWpY4y0M6ruhg%2B9zZeCTaxonjZrtUg%2BtvShS28HJldgtSrf5DV3zDRKIwk5zENmYTG3N1LfGjGiU21kXz40hk74QSi8H8GENyWb4Vp%2BLKCcZPjeIyEdwg%2BY3Hkw6tM9ghNDx9QAGKvJQeBMM%2FqBO8LurR8hXkpcC721BfKJUHADy2%2B2rPzWnDAENPiOPn8xbXbgSVB7dTsFK0wOwS%2BgV%2BkNt%2Bed7fnJSg4iaRKwDsTbAe%2BhN3C5LHm53GSj4BhI80h1AhFIN7DREmcXuYqPo3z%2FHHteAblBvGEDwPQ5PocYAKdtcC7kLR8K7VHPksrp4ljitdVA7JcfSRI6OpjL7uzZ0WcnBztFumuetVbkonmr3tW3QPn4H%2FcxwsEY2C0213Ja1a%2Ba75%2FULqR13ZKyQts%2BKJ97SZX9HfL%2F2cA1fTfFGwD%2FkPDy%2F8C" target="_blank" rel="noopener">abrir o desenho editável</a>.</p>
+    <p>O caminho do lance tem uma única escrita. Tudo o que pode falhar sem invalidar o lance fica fora dele. A versão com os ícones oficiais da AWS abre no diagrams.net: <a id="drawioLink" href="https://app.diagrams.net/?libs=aws4&amp;splash=0#R7ZvdbiO3FcdfhVCAwIvEskaSLTtaLSDLUprCQTaRWxe9MY6G1IhYznCW5Eh2r%2FoKAfoA2fQiSIBc7UXvqzfJk%2FSQ86mV3MiRvYkXNnwxHI4o8v87hx9njp6H11MuGJlJbXo1iOM65RAoCHU9Yqb24nlWJJz2aoJxAbJGIghZr3aOpeW%2FJdkn%2FcsxPhlef64gnn0pKROEXvdq3mGjUSP0plc7sReBsm146cWY%2FwOb8OzthFOmXYWRUhgepwVfRhHzjbsGpeQivT2VIm0lhoAVF2MfRFm65NTMsNQ%2BbqQ3%2FsR4MMOmTo7wRgi2Ei%2F0DKhc2MsXz5WUxg5hwIRwY23UDlbKrmnFIrNeZWpkDiLB7%2F9YmO7k48B0c21kJHjECGUEhAE7Jl8qtfwp8jmQX%2F75LxzZ64QbZhIFVkbbwIFrAbtnbuyYDLs23ZkJRc%2FrguBB1BNsarpTGRknonfsrgdSSNX7qNlqjlpD%2FPScKfzkSr%2B9FBKTITPqhmBlC1VAPIc1skglc6BmmVq2FlD1IPuEHfZBOu6V8ftCJrTQAEdBBvYO%2Be9%2FiIZ9Btrse7bwZYJ09%2Ft%2FL4YmE2PlGWSkG120NMpZPphIRiwf%2BWKGKo1j8FlvgVZWGX4rvXYtel1U2AC2qbC1WPLIMDWcY4say74UAmLNJ%2Fhko6uYnyjN5%2Bwbpm1DjS7aQ8x64XVgzbgOC92uB0omMXbrC2x3Q80VXl654V8h3642Sr5iqyTQu0RlOBYLR2PtO5JGxlWmGsfHo%2BAcr3utxgasFPSMUezqlny9Tgq4XRL2mp0K4s7JlowFrBv5L99%2BRwYQ8mgmCZVEQOQzsqeXP0e%2BkpF8VhqzM3XFdCwj6wqSJDpZvlFcEhaSkAuuNQuSiEpd2AbKi89Sa%2FTKd6Rba0aQ2UYp8Uejs1FjeLQKYnjW8RqNqs7rEKrKe828eCHj3tGaqf0mT%2FNOUhLHVRKtCgmHZSsSk00k3pALFsYSRQZBUOKARRRn6chIsgf6ViaRnaTAKNBAImRBmVLJBEhGc1cazeFgNFqlcTxoj%2FDeH4NGq3Mrjsa2OPxNOL4nX8VMwfIH1PcdyacgZqCRkZxopuYwQfOnQHfVejgcHQ2PV7Xu9Pued%2FQH0frw5Fatm1tqPY9Lsf%2F6cuAWmGSC%2BxRNYsXngNPj%2Fa4tzd9zbcHRNjf6zv0sKVljd11S3J7qxjpIibN1VKHptbekmRQs%2F5KtBtp5kLKusrdgE3JAcEP6rECqXzHjz7Cra2zXjXMD7YqzuIfOVsR1jxRi5Jqew4SJl1JzwxHSRBojw1sF95k1icI3K1YEOrYdnfJrRt8xHW%2BTaSQ4M%2BhtiRxmQKzuGZCVJX7bXdy04OG2byNcLwz5hFz2RxUsCgwjgofcfEogwu0cavIQhDLrXDH%2Fqft7MEilqzdWgW0AhHsZmSifWd9Fb9frPux2hVOr4fab8XsCKYOSpAwibmQFIFbgcoML%2FJ8vLx4C3NlZq90ePGZwqWTbUuu0U2peZT78LdSgsq%2Frn58%2BudQ6GSbwKMn9KyGBXk3A7lBxadt6mmzej3tBzAtQp5yS%2Fssv7EZkOBiTEagA58fS27TBomBa42SZ4FZco3rY5QeAmx1yHi%2FcaardXd1uV5qUlm53dhNBKM9OS35M%2B4qncRvKfVQLRHUqxUXanp8%2BwZbs4cukcZ2HmFUHJ83DM%2B8R46VOWzrZ%2BtTQuKfVcKHLaRU99XO0sQXclBQv2WQsfQT1NOOuU8O57ipIFbvrLqZ9uBu3SJZh1XMIJxRKZljHp6gLleppKl2nJpxcd%2Fa0XYmxyL%2BVGNYxpYCINC7%2BRG1nas172s74i9Vj3yUgkBJcuPzRKJQFdzBCBnYfI0CFTD8EwY532Dl97Ee%2BhdXvqnnX6fKosxvGa1Vg%2FNv%2BN9UFbs8oFwJ69oRsHdm12n5lyw8Qu6Ki4nXBavz1mJydf12hlYWHIV6%2B1URhO5zpJ3Qb0OnX%2Bs5L3K7otD8r0Ln43aniNKgc%2BMY%2BKpcIpp6IbTi%2FW8UmTrE7L3M7b068ApxXJy%2B%2FGl%2BQA%2FeKq1zJGPYrHaxUZiYDe9ob5ve6%2BVuZRq4Ti2jfpiX0JgLPD7Y4QlY9b%2BPLx%2FRempfQrEjsbbACYdmdgv8qcN%2BZv0tzf9Vwve3vO%2FKRFIGLrRs8UDPj4rorqiomwPB5%2BtGtpGsW0n2QWtnAdy6WjcLtqFbrw1bLxSkLuWK%2Bq1zt9yTXSlz6%2FuTyfs24bDD%2BHuU6LORq1smFgkiDby4VN6wapPowLc8GXnMpbdxuRymPCilbdTI2ikH4wIvBSjzo%2FQnnYpy5cDausqNwnUK4dp1Eci5JrNjyB%2FlBiufiULl4C72rdseFdnGiZ49SsV%2Bb8mzENRcs2VWvk%2Fe0PPxOWq1Ylz0Y7iiXTajN9IokmUnl8ioeVrosy%2Bh9O6Y7i%2BXS2djjrtKVJ4Qp82dA9ioL6rMPUkIXsb2%2FFVWwYGMmtEtuZiFpNYj%2BrJoN9%2B13eaIh0cu3ZPkjAR8fl%2BR1AhGVWJm%2FkiN4jJwDKVoFPM%2FiUdYmOLKyxc%2FcA9xeulavOHWV7g4BHlFIMx7ZNde4Y9pbfW9HhgRI%2FlLPJrRmSdy2X9glRqaSE5c9sadxOAo7m2667CHbfrr8CNNm%2BYYgImVknfSJVPhNRE7RnECkDaa3KNOaaWwmDLnRdWIzOX2gkN0hGjgusaUO2T4FR0PSGDuBOddAjKRSE%2FxHzHjI5zGgMliSihRvuFz6oWZpBqL6FFFx%2Bzg2YWNQNiMxg2ET3XiUoBjLNzheabv1PdYW0Q2Sx%2FPLEVemG9u5WC3fxopnr05dHqTNgs9fqPIwZlhMT%2BBYEUuureRTHtZ3TTpNXWB1du%2BceCf%2FJxEy5JSi926XC9ncOd%2F%2B%2BLCSCtn2KuEMmx58q6sdpD9SOKj%2B0AKL2S80XIX9LceL%2FwE%3D" target="_blank" rel="noopener">abrir o desenho editável</a>.</p>
   </div>
   <div class="diagram">
-  <svg viewBox="0 0 1000 600" role="img" aria-label="Arquitetura em três faixas: transacional, ingestão SOR e camadas SOT/SPEC">
+  <svg viewBox="0 0 1000 600" role="img" aria-label="Arquitetura em três faixas: caminho do lance, tempo real e operação">
     <defs>
       <marker id="mTx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="g-tx"/></marker>
       <marker id="mIng" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="g-ing"/></marker>
       <marker id="mDat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="g-dat"/></marker>
     </defs>
-    <rect x="130" y="10" width="860" height="180" rx="8" class="lane-tx"/>
-    <text x="146" y="34" class="lanetitle">① Transacional: decide o lance em tempo real</text>
-    <text x="146" y="52" class="lanesub">base operacional que decide</text>
-    <rect x="130" y="205" width="860" height="170" rx="8" class="lane-ing"/>
-    <text x="146" y="229" class="lanetitle">② Ingestão em streaming: camada SOR</text>
-    <text x="146" y="247" class="lanesub">System of Record: dado bruto, como veio (CDC, at-least-once)</text>
-    <rect x="130" y="390" width="860" height="200" rx="8" class="lane-dat"/>
-    <text x="146" y="414" class="lanetitle">③ SOT → SPEC, governança e consumo</text>
-    <text x="146" y="432" class="lanesub">Source of Truth (oficial e limpa) · Specialized (visões por área)</text>
-
+    <rect x="172" y="10" width="818" height="230" rx="8" class="lane-tx"/>
+    <text x="188" y="34" class="lanetitle">① Caminho do lance (síncrono)</text>
+    <text x="188" y="52" class="lanesub">responde ao usuário em milissegundos</text>
+    <rect x="172" y="255" width="818" height="160" rx="8" class="lane-ing"/>
+    <text x="188" y="279" class="lanetitle">② Tempo real e agendamento (assíncrono)</text>
+    <text x="188" y="297" class="lanesub">não atrasa nem derruba o lance</text>
+    <rect x="172" y="430" width="818" height="160" rx="8" class="lane-dat"/>
+    <text x="188" y="454" class="lanetitle">③ Operação</text>
+    <text x="188" y="472" class="lanesub">falhas e observabilidade</text>
     <g id="nodes"></g>
     <g id="edges"></g>
   </svg>
   </div>
   <ol class="steps">
-    <li><b>Lance:</b> o usuário envia o valor com um <code>lance_id</code> único.</li>
-    <li><b>Decisão:</b> a Lambda grava no DynamoDB só se a versão do leilão não mudou.</li>
-    <li><b>CDC:</b> cada gravação vira evento no Kinesis e vai bruta para a SOR no S3.</li>
-    <li><b>SOR → SOT:</b> o Glue deduplica, reordena, pseudonimiza e roda Data Quality.</li>
-    <li><b>SOT → SPEC:</b> visões prontas por área, em tabelas Iceberg.</li>
-    <li><b>Consumo:</b> Athena e QuickSight, com acesso governado pelo Lake Formation.</li>
+    <li><b>Lance:</b> o usuário envia o valor e uma <code>Idempotency-Key</code>; CloudFront e WAF filtram bots.</li>
+    <li><b>Decisão:</b> a Bid API no Fargate grava no DynamoDB só se a chave é nova e a versão do leilão não mudou.</li>
+    <li><b>Evento:</b> o commit sai no DynamoDB Streams, sem gravação dupla.</li>
+    <li><b>Tempo real:</b> a Lambda envia o novo preço a todos pelo WebSocket; se falhar, vai para a DLQ.</li>
   </ol>
-  <div class="legend">
-    <div class="l1"><b>① Transacional.</b> O lance só é aceito quando o DynamoDB grava com condição: a versão do leilão não mudou e o <code>lance_id</code> ainda não existe. A ordem oficial é a ordem desses commits.</div>
-    <div class="l2"><b>② SOR.</b> Cada gravação vira evento pelo DynamoDB Streams (CDC). Não existe evento perdido entre decidir e publicar. Chega duplicado e fora de ordem, e tudo bem.</div>
-    <div class="l3"><b>③ SOT e SPEC.</b> Glue deduplica, reordena, pseudonimiza e roda Data Quality, inclusive a reconciliação com o DynamoDB. Lake Formation controla quem vê o quê.</div>
-  </div>
 </section>
 
 <section id="como-funciona">
   <div class="sechead">
-    <span class="eyebrow">3 · Explicação</span>
+    <span class="eyebrow">4 · Explicação</span>
     <h2>Como funciona, passo a passo</h2>
   </div>
   <div class="grid2">
@@ -240,7 +284,7 @@ Ana grava 101           Beto grava 101
 <div class="timeline">Ana grava (versão 0)   <span class="ok">OK → versão 1</span>
 Beto grava (versão 0)  <span class="bad">FALHA: versão mudou</span>
 Beto relê: 101 não supera 101 + R$ 1
-<span class="ok">resultado: um vencedor, ordem definida</span></div>
+<span class="ok">resultado: 201 para Ana, 409 para Beto</span></div>
     </div>
   </div>
   <div class="tablebox">
@@ -248,53 +292,45 @@ Beto relê: 101 não supera 101 + R$ 1
       <thead><tr><th>Garantia pedida</th><th>Como é atendida</th><th>Na AWS</th></tr></thead>
       <tbody>
         <tr><td>Sem lance inválido por corrida</td><td>escrita condicional pela versão do leilão</td><td>DynamoDB <code>ConditionExpression</code></td></tr>
-        <tr><td>Sem lance duplicado</td><td><code>lance_id</code> é chave de idempotência; retry recebe a mesma resposta</td><td><code>attribute_not_exists</code></td></tr>
+        <tr><td>Sem lance duplicado</td><td><code>Idempotency-Key</code> gravada na mesma transação</td><td><code>attribute_not_exists</code></td></tr>
         <tr><td>Ordem determinística</td><td>ordem de commit no servidor, nunca o relógio do cliente</td><td>sequência gravada no item</td></tr>
-        <tr><td>Tempo real</td><td>uma escrita por lance; novo preço enviado por push</td><td>Lambda + API Gateway WebSocket</td></tr>
-        <tr><td>Nenhum evento perdido</td><td>o evento nasce do próprio commit</td><td>DynamoDB Streams (CDC)</td></tr>
-        <tr><td>Dado confiável</td><td>dedup, reordenação, LGPD, Data Quality e reconciliação</td><td>Glue + Iceberg + Lake Formation</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="tablebox">
-    <table>
-      <thead><tr><th>Camada</th><th>Em uma frase</th><th>Neste projeto</th></tr></thead>
-      <tbody>
-        <tr><td><b>SOR</b> · System of Record</td><td>o que a origem mandou, exatamente como veio</td><td>eventos do CDC, com duplicados e fora de ordem</td></tr>
-        <tr><td><b>SOT</b> · Source of Truth</td><td>a versão oficial: limpa, única e ordenada</td><td>1 linha por lance, ordem de commit, usuário pseudonimizado</td></tr>
-        <tr><td><b>SPEC</b> · Specialized</td><td>a visão pronta para uma área usar</td><td>resumo por leilão e motivos de rejeição</td></tr>
+        <tr><td>Tempo real</td><td>uma escrita por lance; novo preço por push</td><td>Streams + Lambda + WebSocket</td></tr>
+        <tr><td>Escala</td><td>API stateless; estado só no banco</td><td>ECS Fargate com auto scaling</td></tr>
+        <tr><td>Abuso</td><td>limite de taxa por usuário</td><td>WAF + token bucket (429)</td></tr>
       </tbody>
     </table>
   </div>
   <div>
     <h3 style="margin-bottom:10px">Perguntas frequentes</h3>
-    <details><summary>Por que não ordenar pelo horário do celular?</summary><p>O relógio do cliente pode estar errado ou ser manipulado. Quem define a ordem é o servidor, no momento em que grava. A SOT usa essa sequência para reordenar.</p></details>
-    <details><summary>Se o transacional já é idempotente, por que deduplicar de novo na SOT?</summary><p>São garantias diferentes. O transacional garante uma decisão por lance. O stream pode entregar a mesma decisão mais de uma vez. Cada camada protege a própria fronteira.</p></details>
-    <details><summary>Como saber que o dado analítico está certo?</summary><p>Regras de Data Quality rodam a cada carga. A principal compara o preço final da SPEC com o preço no DynamoDB. Se divergir, um alarme dispara.</p></details>
-    <details><summary>E a LGPD?</summary><p>O lake não guarda o id real do usuário, só um pseudônimo (hash com sal). A chave fica no Secrets Manager e o Lake Formation restringe colunas.</p></details>
+    <details><summary>Por que não usar um lock?</summary><p>Um lock distribuído é mais um sistema que pode falhar, e o tempo dele pode expirar no meio da operação. Com a condição dentro do banco, conferir e gravar são a mesma operação atômica.</p></details>
+    <details><summary>Por que não ordenar pelo horário do celular?</summary><p>O relógio do cliente pode estar errado ou ser manipulado. Quem define a ordem é o servidor, no momento em que grava.</p></details>
+    <details><summary>E se o cliente não receber a resposta?</summary><p>Ele reenvia com a mesma chave e recebe a mesma decisão. Se usar a mesma chave com outro valor, recebe 422.</p></details>
     <details><summary>E se um leilão receber 100 mil lances por segundo?</summary><p>Uma chave do DynamoDB aceita cerca de 1.000 escritas por segundo. A API recusa na hora quem está abaixo do preço atual, usando um cache, e só os lances plausíveis chegam à escrita condicional.</p></details>
+    <details><summary>E se a notificação falhar?</summary><p>O lance continua aceito. A notificação está fora do caminho do lance: falhas vão para uma fila de erros e o cliente pode consultar o preço a qualquer momento.</p></details>
   </div>
 </section>
 
 <section id="codigo">
   <div class="sechead">
-    <span class="eyebrow">4 · Código</span>
-    <h2>Rodar a versão em Python</h2>
-    <p>O projeto usa só a biblioteca padrão (Python 3.10+). Tem 16 testes, incluindo 50 threads que largam juntas com o mesmo valor e só uma vence.</p>
+    <span class="eyebrow">5 · Código</span>
+    <h2>Rodar a API em Python</h2>
+    <p>Só a biblioteca padrão (Python 3.10+). São 21 testes, incluindo 50 requisições HTTP simultâneas com o mesmo valor: exatamente um 201 e 49 409. Código em <a href="https://github.com/fortunaatooa-cell/leilao-alta-concorrencia" target="_blank" rel="noopener">github.com/fortunaatooa-cell/leilao-alta-concorrencia</a>.</p>
   </div>
   <div class="cmd"><code>python -m unittest -v</code><button type="button" class="ghost" data-copy="python -m unittest -v">Copiar</button></div>
-  <div class="cmd"><code>python simular.py --lances 100000 --threads 128</code><button type="button" class="ghost" data-copy="python simular.py --lances 100000 --threads 128">Copiar</button></div>
+  <div class="cmd"><code>python servidor.py</code><button type="button" class="ghost" data-copy="python servidor.py">Copiar</button></div>
+  <div class="cmd"><code>python simular.py --http</code><button type="button" class="ghost" data-copy="python simular.py --http">Copiar</button></div>
   <div class="tablebox"><table>
     <thead><tr><th>Arquivo</th><th>Responsabilidade</th></tr></thead>
     <tbody>
       <tr><td><code>leilao/dominio.py</code></td><td>regras do lance: incremento mínimo, encerramento, extensão anti-sniping</td></tr>
-      <tr><td><code>leilao/repositorio.py</code></td><td>gravação atômica e condicional (imita o DynamoDB) e eventos de saída</td></tr>
       <tr><td><code>leilao/servico.py</code></td><td>ler, decidir e gravar; quem perde a corrida é reavaliado</td></tr>
-      <tr><td><code>leilao/dados.py</code></td><td>SOR → SOT → SPEC, Data Quality, reconciliação e pseudonimização</td></tr>
-      <tr><td><code>tests/</code></td><td>regras, concorrência e pipeline de dados</td></tr>
+      <tr><td><code>leilao/repositorio.py</code></td><td>interface e versão em memória da gravação atômica condicional</td></tr>
+      <tr><td><code>leilao/repositorio_dynamodb.py</code></td><td>a mesma interface em produção, com TransactWriteItems</td></tr>
+      <tr><td><code>leilao/api.py</code></td><td>rotas HTTP, validação, status, limite de taxa e tempo real</td></tr>
+      <tr><td><code>tests/</code></td><td>regras, concorrência e API ponta a ponta</td></tr>
     </tbody>
   </table></div>
-  <footer>Cenário fictício criado para um processo seletivo. Não usa dados nem sistemas internos de nenhuma instituição.</footer>
+  <footer>Cenário fictício criado para um processo seletivo.</footer>
 </section>
 </div>
 
@@ -305,16 +341,13 @@ const $=id=>document.getElementById(id);
 const fmt=n=>n.toLocaleString("pt-BR");
 const brl=c=>(c/100).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 
-/* ---------- gerador determinístico ---------- */
 function rng(seed){let s=seed>>>0;return()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}}
-function pseudo(u){let h=0x811c9dc5;const s="sal:"+u;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return("00000000"+(h>>>0).toString(16)).slice(-8)}
 
-/* ---------- fila de eventos por tempo (heap) ---------- */
 class Heap{constructor(){this.a=[]}push(x){const a=this.a;a.push(x);let i=a.length-1;while(i>0){const p=(i-1)>>1;if(a[p].t<=x.t)break;a[i]=a[p];i=p}a[i]=x}
 pop(){const a=this.a,top=a[0],last=a.pop();if(a.length){let i=0;for(;;){let l=2*i+1,r=l+1,m=i;if(l<a.length&&a[l].t<(m===i?last.t:a[m].t))m=l;if(r<a.length&&a[r].t<(m===i?last.t:a[m].t))m=r;if(m===i)break;a[i]=a[m];i=m}a[i]=last}return top}get size(){return this.a.length}}
 
-/* ---------- camada transacional ---------- */
 const INC=100, LEILOES=["leilao-001","leilao-002","leilao-003","leilao-004","leilao-005","leilao-006"], FECHADO="leilao-006";
+const HTTP={lance_vencedor:201,abaixo_do_minimo:409,usuario_ja_e_o_vencedor:409,valor_invalido:422,leilao_encerrado:422};
 function minimo(e){return e.vencedor?e.preco+INC:e.preco}
 function avaliar(e,l){
   if(l.valor<=0)return["rejeitado","valor_invalido"];
@@ -326,89 +359,72 @@ function avaliar(e,l){
 function simular(cfg){
   const r=rng(42), estados={};
   LEILOES.forEach(id=>estados[id]={id,preco:10000,vencedor:null,usuarioVenc:null,versao:0,seq:0,encerrado:id===FECHADO});
-  const decisoes=new Map(), outbox=[], q=new Heap();
-  let conflitos=0, reenvios=0, requisicoes=0;
+  const decisoes=new Map(), gravadas=[], q=new Heap(), respostas={};
+  let conflitos=0, requisicoes=0;
+  const responder=c=>{respostas[c]=(respostas[c]||0)+1};
   for(let i=0;i<cfg.lances;i++){
     const leilao=r()<cfg.quente?LEILOES[0]:LEILOES[1+Math.floor(r()*5)];
-    q.push({t:r()*2000,tipo:"ver",l:{id:"lance-"+String(i).padStart(7,"0"),leilao,usuario:"usuario-"+Math.floor(r()*5000),mult:1+Math.floor(r()*5),invalido:r()<0.02,retry:r()<cfg.retry}});
+    q.push({t:r()*2000,tipo:"ver",l:{id:"lance-"+String(i).padStart(6,"0"),leilao,usuario:"usuario-"+Math.floor(r()*5000),mult:1+Math.floor(r()*5),invalido:r()<0.02,retry:r()<cfg.retry}});
   }
   while(q.size){
     const ev=q.pop(), l=ev.l, e=estados[l.leilao];
     if(ev.tipo==="ver"){
       l.valor=l.invalido?-1:minimo(e)+(l.mult-1)*INC;
-      q.push({t:ev.t+r()*20,tipo:"enviar",l,primeira:true});
+      q.push({t:ev.t+r()*20,tipo:"enviar",l,nova:true});
     }else if(ev.tipo==="enviar"){
-      if(ev.primeira||ev.reenvio)requisicoes++;
-      if(cfg.seguro&&decisoes.has(l.id)){reenvios++;continue}
-      const snap={versao:e.versao,preco:e.preco,vencedor:e.vencedor,usuarioVenc:e.usuarioVenc,encerrado:e.encerrado};
-      q.push({t:ev.t+1+r()*4,tipo:"gravar",l,snap,reenvio:ev.reenvio});
-    }else{ // gravar
+      if(ev.nova)requisicoes++;
+      if(cfg.seguro&&decisoes.has(l.id)){responder("reenvio");continue}
+      q.push({t:ev.t+1+r()*4,tipo:"gravar",l,reenvio:ev.reenvio,snap:{versao:e.versao,preco:e.preco,vencedor:e.vencedor,usuarioVenc:e.usuarioVenc,encerrado:e.encerrado}});
+    }else{
       if(cfg.seguro){
-        if(decisoes.has(l.id)){reenvios++;continue}
-        if(e.versao!==ev.snap.versao){conflitos++;q.push({t:ev.t+0.05,tipo:"enviar",l});continue}
-      }else if(ev.reenvio)reenvios++;
+        if(decisoes.has(l.id)){responder("reenvio");continue}
+        if(e.versao!==ev.snap.versao){conflitos++;q.push({t:ev.t+0.05,tipo:"enviar",l,reenvio:ev.reenvio});continue}
+      }
       const[status,motivo]=avaliar(ev.snap,l);
-      const antes=ev.snap.preco;
       if(status==="aceito"){e.preco=l.valor;e.vencedor=l.id;e.usuarioVenc=l.usuario;e.versao=ev.snap.versao+1}
       e.seq++;
-      const d={leilao:l.leilao,seq:e.seq,lance:l.id,usuario:l.usuario,valor:l.valor,status,motivo,antes,depois:status==="aceito"?l.valor:antes,versao:status==="aceito"?e.versao:ev.snap.versao};
+      const d={leilao:l.leilao,seq:e.seq,lance:l.id,usuario:l.usuario,valor:l.valor,status,motivo,antes:ev.snap.preco};
       if(!decisoes.has(l.id))decisoes.set(l.id,d);
-      outbox.push(d);
-      if(l.retry&&!ev.reenvio)q.push({t:ev.t+50+r()*50,tipo:"enviar",l,reenvio:true});
+      gravadas.push(d);
+      responder(String(HTTP[motivo]));
+      if(l.retry&&!ev.reenvio){requisicoes++;q.push({t:ev.t+50+r()*50,tipo:"enviar",l,reenvio:true})}
     }
   }
-  return{estados,outbox,conflitos,reenvios,requisicoes};
+  return{estados,gravadas,conflitos,requisicoes,respostas};
 }
 
-/* ---------- plataforma de dados ---------- */
-function pipeline(res,cfg){
-  const r=rng(7), sor=[];
-  res.outbox.forEach(d=>{sor.push(d);if(r()<cfg.dup)sor.push(d)});
-  for(let i=sor.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[sor[i],sor[j]]=[sor[j],sor[i]]}
-  const vistos=new Map();
-  sor.forEach(d=>{if(!vistos.has(d.lance))vistos.set(d.lance,{...d,usuario:pseudo(d.usuario)})});
-  const sot=[...vistos.values()].sort((a,b)=>a.leilao<b.leilao?-1:a.leilao>b.leilao?1:a.seq-b.seq);
-  const por={};sot.forEach(x=>(por[x.leilao]=por[x.leilao]||[]).push(x));
-  const spec=LEILOES.map(id=>{const ls=por[id]||[],ac=ls.filter(x=>x.status==="aceito"),u=ac[ac.length-1];
-    return{id,recebidos:ls.length,aceitos:ac.length,taxa:ls.length?100*ac.length/ls.length:0,part:new Set(ls.map(x=>x.usuario)).size,preco:u?u.valor:null,venc:u?u.usuario:"—"}});
-  const ids=res.outbox.map(d=>d.lance);
-  let crescOk=true,badIdx=new Set();
-  Object.values(por).forEach(ls=>{const ac=ls.filter(x=>x.status==="aceito");for(let i=1;i<ac.length;i++)if(ac[i].valor<ac[i-1].valor+INC){crescOk=false;badIdx.add(ac[i].lance)}});
-  const seqOk=Object.values(por).every(ls=>{
-    // sequência sem buraco, considerando a primeira decisão de cada lance
-    const s=ls.map(x=>x.seq);return s.every((v,i)=>i===0||v>s[i-1]);
-  });
-  const reconc=spec.every(g=>{const e=res.estados[g.id];return g.preco===null?e.vencedor===null:g.preco===e.preco});
-  const fechadoOk=spec.find(g=>g.id===FECHADO).aceitos===0;
-  const checks=[
-    ["Uma decisão por lance na origem",new Set(ids).size===ids.length],
-    ["Unicidade de lance_id na SOT",sot.length===vistos.size],
-    ["Sequência crescente por leilão (ordem determinística)",seqOk],
-    ["Lances aceitos sempre superam o anterior + R$ 1,00",crescOk],
-    ["Reconciliação SPEC × DynamoDB (preço final)",reconc],
-    ["Leilão encerrado não aceitou lances",fechadoOk],
-    ["Sem dado pessoal na SOT",!sot.some(x=>x.usuario.startsWith("usuario-"))],
-  ];
-  return{sor,sot,spec,checks,por,badIdx};
+function verificar(res){
+  const por={};res.gravadas.forEach(d=>(por[d.leilao]=por[d.leilao]||[]).push(d));
+  const ids=res.gravadas.map(d=>d.lance);
+  const bad=new Set();let cresc=true;
+  Object.values(por).forEach(ls=>{const ac=ls.filter(x=>x.status==="aceito");for(let i=1;i<ac.length;i++)if(ac[i].valor<ac[i-1].valor+INC){cresc=false;bad.add(ac[i].lance)}});
+  const final=LEILOES.every(id=>{const ac=(por[id]||[]).filter(x=>x.status==="aceito"),u=ac[ac.length-1],e=res.estados[id];return u?e.preco===u.valor&&e.vencedor===u.lance:e.vencedor===null});
+  const fechado=!(por[FECHADO]||[]).some(x=>x.status==="aceito");
+  return{por,bad,checks:[
+    ["Uma decisão por lance (idempotência)",new Set(ids).size===ids.length],
+    ["Ordem de commit sem buracos por leilão",Object.values(por).every(ls=>ls.every((x,i)=>x.seq===i+1))],
+    ["Cada lance aceito supera o anterior + R$ 1,00",cresc],
+    ["Estado final = último lance aceito",final],
+    ["Leilão encerrado não aceitou lances",fechado],
+  ]};
 }
 
-/* ---------- renderização ---------- */
 function kv(el,rows){el.innerHTML=rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("")}
 function render(cfg){
-  const res=simular(cfg), d=pipeline(res,cfg);
-  const aceitos=res.outbox.filter(x=>x.status==="aceito").length;
-  kv($("kvTx"),[["Requisições recebidas",fmt(res.requisicoes)],["Decisões gravadas",fmt(res.outbox.length)],["Lances aceitos",fmt(aceitos)],["Corridas detectadas e reavaliadas",cfg.seguro?fmt(res.conflitos):"desligado"],["Reenvios respondidos sem nova decisão",cfg.seguro?fmt(res.reenvios):"0"]]);
-  kv($("kvIng"),[["Linhas na SOR (como chegaram)",fmt(d.sor.length)],["Duplicados removidos",fmt(d.sor.length-d.sot.length)],["Linhas na SOT",fmt(d.sot.length)],["Lances distintos enviados",fmt(cfg.lances)]]);
-  $("checks").innerHTML=d.checks.map(([n,ok])=>`<li><span class="chip ${ok?"ok":"bad"}">${ok?"PASSOU":"FALHOU"}</span><span>${n}</span></li>`).join("");
-  const falhas=d.checks.filter(c=>!c[1]).length, v=$("veredito");
-  v.className="verdict "+(falhas?"bad":"ok");
-  v.textContent=falhas?`${falhas} regra(s) de qualidade falharam. Sem a escrita condicional, lances desatualizados e reenvios entraram como decisões válidas.`:`Todas as regras passaram. ${fmt(res.conflitos)} disputas entre lances simultâneos foram resolvidas sem aceitar nenhum lance errado.`;
-  $("tSpec").innerHTML=`<thead><tr><th>Leilão</th><th class="num">Recebidos</th><th class="num">Aceitos</th><th class="num">Taxa de aceite</th><th class="num">Participantes</th><th class="num">Preço final</th><th>Vencedor</th></tr></thead><tbody>`+
-    d.spec.map(g=>`<tr><td class="mono">${g.id}</td><td class="num">${fmt(g.recebidos)}</td><td class="num">${fmt(g.aceitos)}</td><td class="num">${g.taxa.toFixed(1)}%</td><td class="num">${fmt(g.part)}</td><td class="num">${g.preco===null?"—":brl(g.preco)}</td><td class="mono">${g.venc}</td></tr>`).join("")+"</tbody>";
-  const q=(d.por[LEILOES[0]]||[]);
-  $("tSot").innerHTML=`<thead><tr><th class="num">Seq.</th><th>Lance</th><th>Usuário (pseudônimo)</th><th class="num">Valor</th><th class="num">Preço antes</th><th>Status</th><th>Motivo</th></tr></thead><tbody>`+
-    q.slice(0,8).map(x=>`<tr><td class="num">${x.seq}</td><td class="mono">${x.lance}</td><td class="mono">${x.usuario}</td><td class="num">${x.valor>0?brl(x.valor):"inválido"}</td><td class="num">${brl(x.antes)}</td><td><span class="chip ${x.status==="aceito"?"ok":"bad"}">${x.status}</span></td><td class="mono">${x.motivo}</td></tr>`).join("")+"</tbody>";
-  spark(q.filter(x=>x.status==="aceito"),d.badIdx,cfg.seguro);
+  const res=simular(cfg), v=verificar(res), R=res.respostas, aceitos=res.gravadas.filter(x=>x.status==="aceito").length;
+  kv($("kvTx"),[["Requisições recebidas",fmt(res.requisicoes)],["Decisões gravadas",fmt(res.gravadas.length)],["Lances aceitos",fmt(aceitos)],["Corridas detectadas e reavaliadas",cfg.seguro?fmt(res.conflitos):"desligado"]]);
+  kv($("kvHttp"),[["201 aceito",fmt(R["201"]||0)],["409 abaixo do mínimo",fmt(R["409"]||0)],["422 encerrado ou inválido",fmt(R["422"]||0)],["Reenvio com a mesma resposta",fmt(R.reenvio||0)]]);
+  $("checks").innerHTML=v.checks.map(([n,ok])=>`<li><span class="chip ${ok?"ok":"bad"}">${ok?"PASSOU":"FALHOU"}</span><span>${n}</span></li>`).join("");
+  const falhas=v.checks.filter(c=>!c[1]).length, ve=$("veredito");
+  ve.className="verdict "+(falhas?"bad":"ok");
+  ve.textContent=falhas?`${falhas} invariante(s) quebradas. Sem a escrita condicional, lances com preço desatualizado e reenvios viraram decisões válidas.`:`Todas as invariantes passaram. ${fmt(res.conflitos)} disputas entre lances simultâneos foram resolvidas sem aceitar nenhum lance errado.`;
+  $("tResumo").innerHTML=`<thead><tr><th>Leilão</th><th class="num">Decisões</th><th class="num">Aceitos</th><th class="num">Preço final</th><th>Vencedor</th></tr></thead><tbody>`+
+    LEILOES.map(id=>{const ls=v.por[id]||[],ac=ls.filter(x=>x.status==="aceito"),e=res.estados[id];
+      return`<tr><td class="mono">${id}</td><td class="num">${fmt(ls.length)}</td><td class="num">${fmt(ac.length)}</td><td class="num">${e.vencedor?brl(e.preco):"—"}</td><td class="mono">${e.usuarioVenc||"—"}</td></tr>`}).join("")+"</tbody>";
+  const q=v.por[LEILOES[0]]||[];
+  $("tDec").innerHTML=`<thead><tr><th class="num">Seq.</th><th>Lance</th><th>Usuário</th><th class="num">Valor</th><th class="num">Preço antes</th><th>HTTP</th><th>Motivo</th></tr></thead><tbody>`+
+    q.slice(0,8).map(x=>`<tr><td class="num">${x.seq}</td><td class="mono">${x.lance}</td><td class="mono">${x.usuario}</td><td class="num">${x.valor>0?brl(x.valor):"inválido"}</td><td class="num">${brl(x.antes)}</td><td><span class="chip ${x.status==="aceito"?"ok":"bad"}">${HTTP[x.motivo]}</span></td><td class="mono">${x.motivo}</td></tr>`).join("")+"</tbody>";
+  spark(q.filter(x=>x.status==="aceito"),v.bad,cfg.seguro);
 }
 function spark(ac,bad,seguro){
   const s=$("spark"),W=420,H=150,P={l:56,r:10,t:10,b:20};
@@ -425,59 +441,54 @@ function spark(ac,bad,seguro){
   $("sparkCap").textContent=seguro?"Cada ponto é um lance aceito, na ordem de commit. Com proteção, a linha só sobe.":`Sem proteção: ${fmt(bad.size)} lances aceitos (pontos vermelhos) não superavam o anterior.`;
 }
 
-/* ---------- controles ---------- */
-const cfgAtual=()=>({lances:+$("nLances").value,quente:+$("pQuente").value/100,retry:+$("pRetry").value/100,dup:+$("pDup").value/100,seguro:$("seguro").checked});
-[["nLances","oLances",v=>fmt(+v)],["pQuente","oQuente",v=>v+"%"],["pRetry","oRetry",v=>v+"%"],["pDup","oDup",v=>v+"%"]].forEach(([i,o,f])=>{$(i).addEventListener("input",()=>$(o).textContent=f($(i).value))});
+const cfgAtual=()=>({lances:+$("nLances").value,quente:+$("pQuente").value/100,retry:+$("pRetry").value/100,seguro:$("seguro").checked});
+[["nLances","oLances",v=>fmt(+v)],["pQuente","oQuente",v=>v+"%"],["pRetry","oRetry",v=>v+"%"]].forEach(([i,o,f])=>{$(i).addEventListener("input",()=>$(o).textContent=f($(i).value))});
 function rodar(){$("veredito").textContent="Simulando…";setTimeout(()=>render(cfgAtual()),10)}
 $("rodar").addEventListener("click",rodar);
-$("seguro").addEventListener("change",rodar);
+$("seguro").addEventListener("change",()=>{$("semProtecao").textContent=$("seguro").checked?"Comparar sem proteção":"Voltar a ligar a proteção";rodar()});
 $("semProtecao").addEventListener("click",()=>{const s=$("seguro");s.checked=!s.checked;$("semProtecao").textContent=s.checked?"Comparar sem proteção":"Voltar a ligar a proteção";rodar()});
 document.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",()=>{
-  const t=b.getAttribute("data-copy");
-  const done=()=>{b.textContent="Copiado";setTimeout(()=>b.textContent="Copiar",1500)};
-  if(navigator.clipboard)navigator.clipboard.writeText(t).then(done,()=>{const r=document.createRange();r.selectNodeContents(b.previousElementSibling);const s=getSelection();s.removeAllRanges();s.addRange(r)});
+  const t=b.getAttribute("data-copy"), done=()=>{b.textContent="Copiado";setTimeout(()=>b.textContent="Copiar",1500)};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents(b.previousElementSibling);const s=getSelection();s.removeAllRanges();s.addRange(r)};
+  if(navigator.clipboard)navigator.clipboard.writeText(t).then(done,sel);else sel();
 }));
 
-/* ---------- diagrama ---------- */
+/* diagrama */
 const NODES=[
-  ["usr",20,90,"Usuários","web / app","g-usr","U"],
-  ["gw",170,80,"API Gateway","REST + WebSocket","g-tx","API"],
-  ["fn",380,80,"Lambda","Bid API: valida e decide","g-tx","λ"],
-  ["ddb",590,80,"DynamoDB","escrita condicional","g-ing","DB"],
-  ["cw",800,80,"CloudWatch","latência, alarmes, DQ","g-sec","CW"],
-  ["kds",590,275,"Kinesis","eventos de lance","g-ing","KDS"],
-  ["fh",800,275,"Data Firehose","entrega em lote","g-ing","FH"],
-  ["glue",800,465,"Glue","ETL + Data Quality","g-dat","GL"],
-  ["s3",590,465,"S3 · SOT / SPEC","Iceberg / Parquet","g-dat","S3"],
-  ["ath",380,465,"Athena","consultas SQL","g-dat","SQL"],
-  ["qs",170,465,"QuickSight","dashboards","g-dat","QS"],
-  ["lf",590,535,"Lake Formation","controle de acesso","g-sec","LF"],
+  ["usr",10,110,"Usuários","web / app","g-usr","U"],
+  ["cf",190,110,"CloudFront + WAF","borda, anti-bot","g-ing","CF"],
+  ["cog",590,62,"Cognito","valida o JWT","g-sec","ID"],
+  ["alb",390,160,"ALB","balanceador","g-ing","LB"],
+  ["api",590,160,"Bid API","ECS Fargate","g-tx","API"],
+  ["ddb",800,160,"DynamoDB","escrita condicional","g-ing","DB"],
+  ["ws",190,330,"API Gateway","WebSocket","g-ing","WS"],
+  ["not",800,330,"Lambda","notificador","g-tx","λ"],
+  ["sch",590,505,"EventBridge","encerra no horário","g-sec","EB"],
+  ["cw",190,505,"CloudWatch","métricas e alarmes","g-sec","CW"],
+  ["xr",390,505,"X-Ray","tracing","g-sec","XR"],
+  ["dlq",800,505,"SQS DLQ","falhas após retries","g-sec","Q"],
 ];
-const W=170,H=52,pos={};
-let g="";
+const W=150,H=52,pos={};let g="";
 NODES.forEach(([id,x,y,n,s,cls,abbr])=>{pos[id]={x,y};
   g+=`<g class="node"><rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="8"/><g class="glyph"><rect class="${cls}" x="${x+8}" y="${y+10}" width="32" height="32" rx="6"/><text x="${x+24}" y="${y+30}" text-anchor="middle">${abbr}</text></g><text class="n" x="${x+48}" y="${y+22}">${n}</text><text class="s" x="${x+48}" y="${y+39}">${s}</text></g>`});
-/* S3 SOR fica na faixa 2 */
-g+=`<g class="node"><rect class="box" x="800" y="335" width="${W}" height="${H-12}" rx="8"/><g class="glyph"><rect class="g-dat" x="808" y="341" width="28" height="28" rx="6"/><text x="822" y="359" text-anchor="middle">S3</text></g><text class="n" x="844" y="352">S3 · SOR</text><text class="s" x="844" y="367">bruto, imutável</text></g>`;
-document.getElementById("nodes").innerHTML=g;
+$("nodes").innerHTML=g;
 const R=id=>({x:pos[id].x+W,y:pos[id].y+H/2}),L=id=>({x:pos[id].x,y:pos[id].y+H/2}),B=id=>({x:pos[id].x+W/2,y:pos[id].y+H}),T=id=>({x:pos[id].x+W/2,y:pos[id].y});
-function arrow(a,b,cls,mk,lbl,dash){const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-  let s=`<path class="arr ${cls}${dash?" dash":""}" d="M${a.x} ${a.y}L${b.x} ${b.y}" marker-end="url(#${mk})"/>`;
-  if(lbl){s+=`<circle class="badge ${cls}" cx="${mx}" cy="${my}" r="10"/><text class="bnum" x="${mx}" y="${my+4}" text-anchor="middle">${lbl}</text>`}return s}
+function arrow(pts,cls,mk,lbl,dash,at){
+  let s=`<path class="arr ${cls}${dash?" dash":""}" d="M${pts.map(p=>p.x+" "+p.y).join("L")}" marker-end="url(#${mk})"/>`;
+  if(lbl){const a=at||pts[0],b=at?at:pts[1],mx=at?at.x:(a.x+b.x)/2,my=at?at.y:(a.y+b.y)/2;s+=`<circle class="badge ${cls}" cx="${mx}" cy="${my}" r="10"/><text class="bnum" x="${mx}" y="${my+4}" text-anchor="middle">${lbl}</text>`}return s}
 let e="";
-e+=arrow(R("usr"),L("gw"),"tx","mTx","1");
-e+=arrow(R("gw"),L("fn"),"tx","mTx","");
-e+=arrow(R("fn"),L("ddb"),"tx","mTx","2");
-e+=arrow(B("ddb"),T("kds"),"ing","mIng","3");
-e+=arrow(R("kds"),L("fh"),"ing","mIng","");
-e+=arrow(B("fh"),{x:885,y:335},"ing","mIng","");
-e+=arrow({x:885,y:375},T("glue"),"dat","mDat","4");
-e+=arrow(L("glue"),R("s3"),"dat","mDat","5");
-e+=arrow(L("s3"),R("ath"),"dat","mDat","");
-e+=arrow(L("ath"),R("qs"),"dat","mDat","6");
-e+=arrow(T("lf"),B("s3"),"dat","mDat","",true);
-document.getElementById("edges").innerHTML=e;
-
+const cfR=R("cf");
+e+=arrow([R("usr"),L("cf")],"tx","mTx","1");
+e+=arrow([cfR,{x:365,y:cfR.y},{x:365,y:L("alb").y},L("alb")],"tx","mTx");
+e+=arrow([R("alb"),L("api")],"tx","mTx");
+e+=arrow([B("cog"),T("api")],"tx","mTx","",true);
+e+=arrow([R("api"),L("ddb")],"tx","mTx","2");
+e+=arrow([B("ddb"),T("not")],"ing","mIng","3");
+e+=arrow([L("not"),R("ws")],"ing","mIng","4");
+e+=arrow([L("ws"),{x:B("usr").x,y:L("ws").y},{x:B("usr").x,y:B("usr").y+4}],"ing","mIng","",true);
+e+=arrow([B("not"),T("dlq")],"ing","mIng","",true);
+e+=arrow([R("sch"),{x:775,y:R("sch").y},{x:775,y:422},{x:984,y:422},{x:984,y:R("ddb").y},R("ddb")],"dat","mDat","",false);
+$("edges").innerHTML=e;
 rodar();
 })();
 </script>

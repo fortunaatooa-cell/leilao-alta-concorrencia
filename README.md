@@ -1,73 +1,105 @@
-# Leilão online de alta concorrência — da decisão do lance ao dado confiável
+# Leilão online de alta concorrência
 
-Solução para o desafio técnico de Engenharia, com olhar de **Engenharia de
-Dados** e de um **contexto bancário** (governança, LGPD, auditoria e
-reconciliação).
+Solução para o desafio técnico de **Engenharia de Software**: centenas de
+milhares de pessoas dando lances ao mesmo tempo, com **resposta em tempo
+real**, **ordem de chegada determinística** e **nenhum lance inválido ou
+duplicado aceito por race condition**.
 
-> Cenário fictício criado para o processo seletivo. Não usa dados nem
-> sistemas internos de nenhuma instituição.
-
-O problema tem duas metades, e a solução trata as duas:
-
-1. **Decidir o lance certo, em tempo real**: com centenas de milhares de
-   lances simultâneos, nenhum lance inválido ou duplicado pode ser aceito
-   por race condition, e a ordem de chegada tem de ser determinística.
-2. **Transformar cada decisão em dado confiável**: o stream entrega
-   *at-least-once* e fora de ordem. A plataforma de dados deduplica,
-   reordena, pseudonimiza, valida a qualidade e **reconcilia** o analítico
-   com o sistema transacional.
+> Cenário fictício criado para um processo seletivo.
 
 | Entregável pedido | Onde está |
 |---|---|
 | Desenho de arquitetura AWS (ícones oficiais) | [`docs/arquitetura_leilao_aws.drawio`](docs/arquitetura_leilao_aws.drawio) |
-| Código-fonte funcional | [`leilao/`](leilao), [`simular.py`](simular.py), [`tests/`](tests) |
+| Código-fonte funcional (API + testes) | [`leilao/`](leilao), [`servidor.py`](servidor.py), [`tests/`](tests) |
 | Documentação das decisões técnicas | [`docs/ARQUITETURA_AWS.md`](docs/ARQUITETURA_AWS.md) |
-| Explicação didática para a apresentação | [`docs/GUIA_ENTREVISTA.md`](docs/GUIA_ENTREVISTA.md) |
+| Roteiro para a apresentação | [`docs/GUIA_ENTREVISTA.md`](docs/GUIA_ENTREVISTA.md) |
 | Especificação usada para construir com IA (spec-driven) | [`docs/SPEC.md`](docs/SPEC.md) |
+
+## A ideia em uma frase
+
+> Cada lance vira **uma única escrita condicional** no registro do leilão:
+> "grave somente se este `Idempotency-Key` ainda não existe **e** o leilão
+> ainda está na versão que eu li". Quem perde a corrida relê e é reavaliado.
+> A ordem oficial é a ordem desses commits, nunca o relógio do usuário.
 
 ## Como rodar
 
-Requer **Python 3.10+** e só a biblioteca padrão.
+Requer **Python 3.10+**. Sem dependências externas: só a biblioteca padrão.
 
 ```bash
 python -m unittest -v
 ```
 
 ```bash
+python servidor.py
+```
+
+Com o servidor no ar (`http://127.0.0.1:8000`), em outro terminal:
+
+```bash
+curl http://127.0.0.1:8000/leiloes/relogio-raro
+```
+
+```bash
+curl -i -X POST http://127.0.0.1:8000/leiloes/relogio-raro/lances -H "Content-Type: application/json" -H "X-Usuario-Id: ana" -H "Idempotency-Key: 7f3c9a2e-1b4d-4e8a-9c1f-2a6b8d0e5f11" -d "{\"valor_cents\": 100000}"
+```
+
+```bash
+curl -N http://127.0.0.1:8000/leiloes/relogio-raro/ao-vivo
+```
+
+Testes de carga:
+
+```bash
 python simular.py
 ```
 
 ```bash
-python simular.py --lances 100000 --threads 128
+python simular.py --http
 ```
 
-O comando imprime três blocos: o **transacional** (lances decididos e
-disputas resolvidas), as **camadas de dados** (SOR → SOT, com os
-duplicados removidos) e a **qualidade de dados** (regras PASSOU/FALHOU). As
-saídas vão para `saida/`:
+Com Docker:
 
-```
-saida/
-  sor/eventos_lances_brutos.csv   eventos como chegaram (com duplicados, fora de ordem)
-  sot/lances.csv                  1 linha por lance, ordenado, usuário pseudonimizado
-  spec/resumo_leiloes.csv          preço final, vencedor, taxa de aceite, participantes
-  spec/motivos_rejeicao.csv        por que os lances foram recusados
-  qualidade.json                   resultado das regras de Data Quality
-  resumo_transacional.json         visão do sistema operacional
+```bash
+docker build -t leilao . && docker run -p 8000:8000 leilao
 ```
 
-Para abrir o diagrama, acesse <https://app.diagrams.net/?libs=aws4&splash=0>,
-clique em **Arquivo → Abrir do dispositivo** e selecione o `.drawio`.
+## API
 
-## Estrutura do código
+| Método e rota | O que faz | Respostas |
+|---|---|---|
+| `POST /leiloes` | cria um leilão `{leilao_id, preco_inicial_cents, duracao_s, incremento_minimo_cents}` | `201`, `400`, `409` já existe |
+| `GET /leiloes/{id}` | preço atual, próximo lance mínimo, vencedor, fim | `200`, `404` |
+| `POST /leiloes/{id}/lances` | dá um lance `{valor_cents}`; headers `Idempotency-Key` e `X-Usuario-Id` | ver abaixo |
+| `GET /leiloes/{id}/ao-vivo` | Server-Sent Events: cada novo preço em tempo real | stream |
+| `GET /saude` | health check | `200` |
+
+Respostas do lance:
+
+| HTTP | Quando |
+|---|---|
+| `201 Created` | lance aceito |
+| mesma resposta + `Idempotent-Replayed: true` | reenvio com a mesma `Idempotency-Key` |
+| `409 Conflict` | abaixo do mínimo (alguém foi mais rápido) ou usuário já é o vencedor |
+| `422 Unprocessable Entity` | leilão encerrado, valor inválido ou chave reutilizada com outro conteúdo |
+| `400` / `401` / `404` / `429` | entrada inválida, sem usuário, leilão inexistente, limite de taxa |
+| `503` | disputa excessiva: reenvie com a mesma chave |
+
+## Estrutura do código (arquitetura hexagonal)
 
 ```
 leilao/
-  dominio.py      regras do lance (puras): incremento mínimo, encerramento, anti-sniping
-  repositorio.py  escrita ATÔMICA e condicional (imita o DynamoDB) + outbox de eventos
-  servico.py      "dar lance": ler → decidir → gravar; se perder a corrida, reavaliar
-  simulacao.py    carga concorrente e verificação das invariantes transacionais
-  dados.py        pipeline SOR → SOT → SPEC, Data Quality, reconciliação e LGPD
-simular.py        linha de comando
-tests/            testes de regras, concorrência e pipeline de dados (16 testes)
+  dominio.py               regras puras: incremento mínimo, encerramento, anti-sniping
+  servico.py               caso de uso "dar lance": ler → decidir → gravar; se perder a corrida, reavaliar
+  repositorio.py           porta (interface) + adaptador em memória com escrita atômica condicional
+  repositorio_dynamodb.py  adaptador de produção: TransactWriteItems condicional
+  notificacoes.py          tempo real: publica cada novo preço para quem assiste
+  api.py                   HTTP: rotas, validação, códigos de status, limite de taxa, SSE
+  simulacao.py             carga concorrente que prova as invariantes
+servidor.py                sobe a API com leilões de exemplo
+simular.py                 teste de carga (serviço ou HTTP)
+tests/                     regras, concorrência e API HTTP ponta a ponta (21 testes)
 ```
+
+O domínio não conhece HTTP nem banco. Trocar o repositório em memória pelo
+DynamoDB não muda nenhuma linha do serviço nem da API.
