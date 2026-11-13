@@ -23,6 +23,7 @@ O problema tem duas metades, e a solução trata as duas:
 | Código-fonte funcional | [`leilao/`](leilao), [`simular.py`](simular.py), [`tests/`](tests) |
 | Documentação das decisões técnicas | [`docs/ARQUITETURA_AWS.md`](docs/ARQUITETURA_AWS.md) |
 | Explicação didática para a apresentação | [`docs/GUIA_ENTREVISTA.md`](docs/GUIA_ENTREVISTA.md) |
+| Especificação usada para construir com IA (spec-driven) | [`docs/SPEC.md`](docs/SPEC.md) |
 
 ## Como rodar
 
