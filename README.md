@@ -9,6 +9,7 @@ duplicado aceito por race condition**.
 
 | Entregável pedido | Onde está |
 |---|---|
+| **Comece aqui:** o conceito explicado de forma simples | [`docs/ENTENDA_O_PROJETO.md`](docs/ENTENDA_O_PROJETO.md) |
 | Desenho de arquitetura AWS (ícones oficiais) | [`docs/arquitetura_leilao_aws.drawio`](docs/arquitetura_leilao_aws.drawio) |
 | Código-fonte funcional (API + testes) | [`leilao/`](leilao), [`servidor.py`](servidor.py), [`tests/`](tests) |
 | Documentação das decisões técnicas | [`docs/ARQUITETURA_AWS.md`](docs/ARQUITETURA_AWS.md) |
